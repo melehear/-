@@ -8,6 +8,8 @@ import random
 from datetime import datetime
 from typing import List, Dict, Optional
 
+DATA_FILE = "books_data.json"
+
 class QuoteManager:
     """Manages quotes and history operations"""
     
@@ -24,11 +26,14 @@ class QuoteManager:
         try:
             with open(self.quotes_file, 'r', encoding='utf-8') as f:
                 loaded_quotes = json.load(f)
-                if loaded_quotes:  # Если файл не пустой
+                if loaded_quotes:
                     self.quotes = loaded_quotes
                 else:
                     self._load_default_quotes()
         except FileNotFoundError:
+            self._load_default_quotes()
+        except json.JSONDecodeError:
+            print("Ошибка чтения quotes.json, загружаются цитаты по умолчанию")
             self._load_default_quotes()
     
     def _load_default_quotes(self):
@@ -39,14 +44,20 @@ class QuoteManager:
             {"text": "Оставайтесь голодными, оставайтесь безрассудными.", "author": "Стив Джобс", "topic": "Успех"},
             {"text": "Быть или не быть — вот в чём вопрос.", "author": "Уильям Шекспир", "topic": "Философия"},
             {"text": "Я мыслю, следовательно, я существую.", "author": "Рене Декарт", "topic": "Философия"},
-            {"text": "Будущее принадлежит тем, кто верит в красоту своей мечты.", "author": "Элеонора Рузвельт", "topic": "Вдохновение"}
+            {"text": "Будущее принадлежит тем, кто верит в красоту своей мечты.", "author": "Элеонора Рузвельт", "topic": "Вдохновение"},
+            {"text": "Неважно, как медленно ты идёшь, главное — не останавливаться.", "author": "Конфуций", "topic": "Мотивация"},
+            {"text": "Успех — это не окончательно, неудача — не фатальна: важна лишь смелость продолжать.", "author": "Уинстон Черчилль", "topic": "Успех"},
+            {"text": "Жизнь — это то, что происходит с тобой, пока ты строишь другие планы.", "author": "Джон Леннон", "topic": "Жизнь"}
         ]
         self.save_quotes()
     
     def save_quotes(self):
         """Save quotes to JSON file"""
-        with open(self.quotes_file, 'w', encoding='utf-8') as f:
-            json.dump(self.quotes, f, ensure_ascii=False, indent=2)
+        try:
+            with open(self.quotes_file, 'w', encoding='utf-8') as f:
+                json.dump(self.quotes, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"Ошибка сохранения quotes.json: {e}")
     
     def load_history(self):
         """Load history from JSON file"""
@@ -55,11 +66,17 @@ class QuoteManager:
                 self.history = json.load(f)
         except FileNotFoundError:
             self.history = []
+        except json.JSONDecodeError:
+            print("Ошибка чтения history.json, создаётся новая история")
+            self.history = []
     
     def save_history(self):
         """Save history to JSON file"""
-        with open(self.history_file, 'w', encoding='utf-8') as f:
-            json.dump(self.history, f, ensure_ascii=False, indent=2)
+        try:
+            with open(self.history_file, 'w', encoding='utf-8') as f:
+                json.dump(self.history, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"Ошибка сохранения history.json: {e}")
     
     def add_quote(self, text: str, author: str, topic: str) -> tuple:
         """
@@ -133,7 +150,7 @@ class QuoteManager:
     
     def get_history_by_filter(self, author: Optional[str] = None, topic: Optional[str] = None) -> List[Dict]:
         """Filter history by author and/or topic"""
-        if not author and not topic:
+        if (not author or author == "Все") and (not topic or topic == "Все"):
             return self.history.copy()
         
         filtered = self.history.copy()
@@ -155,11 +172,10 @@ class QuoteManager:
     def delete_quote(self, index: int) -> bool:
         """Delete a quote by index"""
         if 0 <= index < len(self.quotes):
-            deleted = self.quotes.pop(index)
+            self.quotes.pop(index)
             self.save_quotes()
             return True
         return False
-
         """
 GUI Module - Provides the graphical user interface
 Author: Иван Иванов
@@ -218,6 +234,9 @@ class QuoteApp:
         self.status_var.set("Готов к работе. Используйте вкладки для навигации.")
         status_bar = ttk.Label(self.root, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W)
         status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+        
+        # Initial refresh
+        self.refresh_filters()
     
     def setup_generator_tab(self):
         """Setup the quote generator tab"""
@@ -255,15 +274,8 @@ class QuoteApp:
         
         # Generate button
         generate_btn = ttk.Button(main_frame, text="🎲 Сгенерировать случайную цитату", 
-                                 command=self.generate_quote, style="Accent.TButton")
+                                 command=self.generate_quote)
         generate_btn.pack(pady=10)
-        
-        # Configure style for accent button
-        style = ttk.Style()
-        style.configure("Accent.TButton", font=('Arial', 10, 'bold'))
-        
-        # Initial filter refresh
-        self.refresh_filters()
     
     def setup_quotes_tab(self):
         """Setup the all quotes tab with filtering"""
@@ -316,17 +328,6 @@ class QuoteApp:
         
         self.quotes_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        # Delete button
-        delete_frame = ttk.Frame(main_frame)
-        delete_frame.pack(fill=tk.X, pady=(10, 0))
-        
-        delete_btn = ttk.Button(delete_frame, text="🗑️ Удалить выбранную цитату", 
-                               command=self.delete_selected_quote)
-        delete_btn.pack(side=tk.RIGHT, padx=5)
-        
-        # Initial display
-        self.display_filtered_quotes()
     
     def setup_add_tab(self):
         """Setup the add quote tab"""
@@ -422,9 +423,6 @@ class QuoteApp:
         refresh_btn = ttk.Button(buttons_frame, text="🔄 Обновить историю", 
                                 command=self.display_filtered_history)
         refresh_btn.pack(side=tk.RIGHT, padx=5)
-        
-        # Initial display
-        self.display_filtered_history()
     
     def refresh_filters(self):
         """Refresh all filter dropdowns"""
@@ -442,6 +440,10 @@ class QuoteApp:
         # Update history tab filters
         self.history_author_combo['values'] = authors
         self.history_topic_combo['values'] = topics
+        
+        # Update displays
+        self.display_filtered_quotes()
+        self.display_filtered_history()
         
         self.status_var.set("Фильтры обновлены")
     
@@ -481,9 +483,10 @@ class QuoteApp:
         quotes = self.quote_manager.get_quotes_by_filter(author, topic)
         
         for idx, quote in enumerate(quotes, 1):
+            display_text = quote["text"][:100] + "..." if len(quote["text"]) > 100 else quote["text"]
             self.quotes_tree.insert("", tk.END, values=(
                 idx,
-                quote["text"][:100] + "..." if len(quote["text"]) > 100 else quote["text"],
+                display_text,
                 quote["author"],
                 quote["topic"]
             ))
@@ -502,9 +505,10 @@ class QuoteApp:
         history = self.quote_manager.get_history_by_filter(author, topic)
         
         for entry in reversed(history):  # Show newest first
+            display_text = entry["text"][:100] + "..." if len(entry["text"]) > 100 else entry["text"]
             self.history_tree.insert("", tk.END, values=(
                 entry["timestamp"],
-                entry["text"][:100] + "..." if len(entry["text"]) > 100 else entry["text"],
+                display_text,
                 entry["author"],
                 entry["topic"]
             ))
@@ -523,7 +527,6 @@ class QuoteApp:
             messagebox.showinfo("Успех", message)
             self.clear_add_form()
             self.refresh_filters()
-            self.display_filtered_quotes()
             self.status_var.set("✅ Новая цитата добавлена!")
         else:
             messagebox.showerror("Ошибка валидации", message)
@@ -536,31 +539,6 @@ class QuoteApp:
         self.topic_entry.delete(0, tk.END)
         self.status_var.set("Форма очищена")
     
-    def delete_selected_quote(self):
-        """Delete selected quote from the list"""
-        selected = self.quotes_tree.selection()
-        if not selected:
-            messagebox.showwarning("Нет выбора", "Пожалуйста, выберите цитату для удаления.")
-            return
-        
-        if messagebox.askyesno("Подтверждение удаления", "Вы уверены, что хотите удалить эту цитату?"):
-            # Get the item and delete from manager
-            item = self.quotes_tree.item(selected[0])
-            values = item['values']
-            # Find and delete the quote
-            author = values[2]
-            quote_text_short = values[1]
-            
-            # Find full quote
-            for idx, quote in enumerate(self.quote_manager.quotes):
-                if quote["author"] == author and quote["text"].startswith(quote_text_short.replace("...", "")):
-                    self.quote_manager.delete_quote(idx)
-                    break
-            
-            self.display_filtered_quotes()
-            self.refresh_filters()
-            self.status_var.set("🗑️ Цитата удалена")
-    
     def clear_all_history(self):
         """Clear all history with confirmation"""
         if messagebox.askyesno("Очистка истории", 
@@ -572,4 +550,4 @@ class QuoteApp:
     
     def run(self):
         """Run the application"""
-        self.root.mainloop() 
+        self.root.mainloop()
