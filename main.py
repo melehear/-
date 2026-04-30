@@ -567,3 +567,436 @@ class QuoteApp:
     def run(self):
         """Run the application"""
         self.root.mainloop()
+        """
+GUI Module - Provides the graphical user interface
+Author: Левыкин Александр
+"""
+
+import tkinter as tk
+from tkinter import ttk, messagebox, scrolledtext
+from quote_manager import QuoteManager
+from github_api import GitHubAPI
+
+class GitHubQuoteApp:
+    """Main application class with GitHub user search"""
+    
+    def __init__(self):
+        self.root = tk.Tk()
+        self.quote_manager = QuoteManager()
+        self.github_api = GitHubAPI()
+        self.setup_ui()
+    
+    def setup_ui(self):
+        """Setup the user interface"""
+        self.root.title("GitHub User Search & Random Quote Generator")
+        self.root.geometry("1000x750")
+        self.root.resizable(True, True)
+        
+        # Configure style
+        style = ttk.Style()
+        style.theme_use('clam')
+        
+        # Main container with notebook (tabs)
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Tab 1: GitHub User Search (ОСНОВНАЯ ФУНКЦИЯ)
+        self.github_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.github_frame, text="🔍 Поиск пользователей GitHub")
+        
+        # Tab 2: Random Quote Generator
+        self.generator_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.generator_frame, text="🎲 Генератор цитат")
+        
+        # Tab 3: All Quotes
+        self.quotes_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.quotes_frame, text="📚 Все цитаты")
+        
+        # Tab 4: Add Quote
+        self.add_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.add_frame, text="➕ Добавить цитату")
+        
+        # Tab 5: History
+        self.history_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.history_frame, text="📜 История")
+        
+        # Setup each tab
+        self.setup_github_tab()
+        self.setup_generator_tab()
+        self.setup_quotes_tab()
+        self.setup_add_tab()
+        self.setup_history_tab()
+        
+        # Status bar
+        self.status_var = tk.StringVar()
+        self.status_var.set("Готов к работе. Введите имя пользователя GitHub для поиска.")
+        status_bar = ttk.Label(self.root, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W)
+        status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+        
+        # Initial refresh
+        self.refresh_filters()
+    
+    def setup_github_tab(self):
+        """Setup GitHub user search tab - ОСНОВНАЯ ФУНКЦИЯ"""
+        # Main frame
+        main_frame = ttk.Frame(self.github_frame, padding="10")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Search frame
+        search_frame = ttk.LabelFrame(main_frame, text="Поиск пользователей GitHub", padding="10")
+        search_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        # Search input
+        ttk.Label(search_frame, text="Имя пользователя:", font=('Arial', 10, 'bold')).grid(row=0, column=0, sticky=tk.W, padx=5)
+        self.github_search_entry = ttk.Entry(search_frame, width=40, font=('Arial', 10))
+        self.github_search_entry.grid(row=0, column=1, padx=5, pady=5)
+        self.github_search_entry.bind('<Return>', lambda e: self.search_github_users())
+        
+        # Search button
+        search_btn = ttk.Button(search_frame, text="🔍 Поиск", command=self.search_github_users)
+        search_btn.grid(row=0, column=2, padx=10, pady=5)
+        
+        # Results frame
+        results_frame = ttk.LabelFrame(main_frame, text="Результаты поиска", padding="10")
+        results_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        
+        # Treeview for search results
+        columns = ("Аватар", "Логин", "Тип", "Репозитории", "Подписчики")
+        self.github_tree = ttk.Treeview(results_frame, columns=columns, show="headings", height=10)
+        
+        self.github_tree.heading("Аватар", text="Аватар")
+        self.github_tree.heading("Логин", text="Логин")
+        self.github_tree.heading("Тип", text="Тип")
+        self.github_tree.heading("Репозитории", text="Репозитории")
+        self.github_tree.heading("Подписчики", text="Подписчики")
+        
+        self.github_tree.column("Аватар", width=80)
+        self.github_tree.column("Логин", width=150)
+        self.github_tree.column("Тип", width=100)
+        self.github_tree.column("Репозитории", width=100)
+        self.github_tree.column("Подписчики", width=100)
+        
+        # Add scrollbar
+        scrollbar = ttk.Scrollbar(results_frame, orient=tk.VERTICAL, command=self.github_tree.yview)
+        self.github_tree.configure(yscrollcommand=scrollbar.set)
+        
+        self.github_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Bind selection event
+        self.github_tree.bind('<<TreeviewSelect>>', self.on_user_select)
+        
+        # User details frame
+        details_frame = ttk.LabelFrame(main_frame, text="Детальная информация о пользователе", padding="10")
+        details_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # User details text
+        self.user_details_text = scrolledtext.ScrolledText(details_frame, height=10, wrap=tk.WORD, font=('Arial', 10))
+        self.user_details_text.pack(fill=tk.BOTH, expand=True)
+        
+        # Buttons frame
+        buttons_frame = ttk.Frame(main_frame)
+        buttons_frame.pack(fill=tk.X, pady=(10, 0))
+        
+        view_profile_btn = ttk.Button(buttons_frame, text="🌐 Открыть профиль в браузере", command=self.open_github_profile)
+        view_profile_btn.pack(side=tk.LEFT, padx=5)
+        
+        view_repos_btn = ttk.Button(buttons_frame, text="📚 Показать репозитории", command=self.show_user_repos)
+        view_repos_btn.pack(side=tk.LEFT, padx=5)
+    
+    def setup_generator_tab(self):
+        """Setup the quote generator tab"""
+        main_frame = ttk.Frame(self.generator_frame, padding="10")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Filters frame
+        filter_frame = ttk.LabelFrame(main_frame, text="Фильтры", padding="10")
+        filter_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        # Author filter
+        ttk.Label(filter_frame, text="Автор:").grid(row=0, column=0, sticky=tk.W, padx=5)
+        self.gen_author_var = tk.StringVar(value="Все")
+        self.gen_author_combo = ttk.Combobox(filter_frame, textvariable=self.gen_author_var, width=30)
+        self.gen_author_combo.grid(row=0, column=1, padx=5, pady=5, sticky=tk.W)
+        
+        # Topic filter
+        ttk.Label(filter_frame, text="Тема:").grid(row=1, column=0, sticky=tk.W, padx=5)
+        self.gen_topic_var = tk.StringVar(value="Все")
+        self.gen_topic_combo = ttk.Combobox(filter_frame, textvariable=self.gen_topic_var, width=30)
+        self.gen_topic_combo.grid(row=1, column=1, padx=5, pady=5, sticky=tk.W)
+        
+        # Refresh filters button
+        refresh_btn = ttk.Button(filter_frame, text="🔄 Обновить фильтры", command=self.refresh_filters)
+        refresh_btn.grid(row=0, column=2, rowspan=2, padx=20, pady=5)
+        
+        # Quote display frame
+        quote_frame = ttk.LabelFrame(main_frame, text="Случайная цитата", padding="10")
+        quote_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        
+        self.quote_text = scrolledtext.ScrolledText(quote_frame, height=8, wrap=tk.WORD, 
+                                                      font=('Arial', 12), state='disabled')
+        self.quote_text.pack(fill=tk.BOTH, expand=True)
+        
+        # Generate button
+        generate_btn = ttk.Button(main_frame, text="🎲 Сгенерировать случайную цитату", 
+                                 command=self.generate_quote)
+        generate_btn.pack(pady=10)
+    
+    def setup_quotes_tab(self):
+        """Setup the all quotes tab"""
+        main_frame = ttk.Frame(self.quotes_frame, padding="10")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Filters frame
+        filter_frame = ttk.LabelFrame(main_frame, text="Фильтрация цитат", padding="10")
+        filter_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        ttk.Label(filter_frame, text="Автор:").grid(row=0, column=0, sticky=tk.W, padx=5)
+        self.quotes_author_var = tk.StringVar(value="Все")
+        self.quotes_author_combo = ttk.Combobox(filter_frame, textvariable=self.quotes_author_var, width=30)
+        self.quotes_author_combo.grid(row=0, column=1, padx=5, pady=5)
+        
+        ttk.Label(filter_frame, text="Тема:").grid(row=1, column=0, sticky=tk.W, padx=5)
+        self.quotes_topic_var = tk.StringVar(value="Все")
+        self.quotes_topic_combo = ttk.Combobox(filter_frame, textvariable=self.quotes_topic_var, width=30)
+        self.quotes_topic_combo.grid(row=1, column=1, padx=5, pady=5)
+        
+        apply_filter_btn = ttk.Button(filter_frame, text="🔍 Применить фильтр", 
+                                     command=self.display_filtered_quotes)
+        apply_filter_btn.grid(row=0, column=2, rowspan=2, padx=20, pady=5)
+        
+        # Quotes display
+        quotes_display_frame = ttk.LabelFrame(main_frame, text="Список цитат", padding="10")
+        quotes_display_frame.pack(fill=tk.BOTH, expand=True)
+        
+        columns = ("ID", "Цитата", "Автор", "Тема")
+        self.quotes_tree = ttk.Treeview(quotes_display_frame, columns=columns, show="headings", height=15)
+        
+        self.quotes_tree.heading("ID", text="№")
+        self.quotes_tree.heading("Цитата", text="Цитата")
+        self.quotes_tree.heading("Автор", text="Автор")
+        self.quotes_tree.heading("Тема", text="Тема")
+        
+        self.quotes_tree.column("ID", width=50)
+        self.quotes_tree.column("Цитата", width=500)
+        self.quotes_tree.column("Автор", width=150)
+        self.quotes_tree.column("Тема", width=120)
+        
+        scrollbar = ttk.Scrollbar(quotes_display_frame, orient=tk.VERTICAL, command=self.quotes_tree.yview)
+        self.quotes_tree.configure(yscrollcommand=scrollbar.set)
+        
+        self.quotes_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+    
+    def setup_add_tab(self):
+        """Setup the add quote tab"""
+        main_frame = ttk.Frame(self.add_frame, padding="20")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        ttk.Label(main_frame, text="Текст цитаты:", font=('Arial', 10, 'bold')).pack(anchor=tk.W, pady=(0, 5))
+        self.quote_text_entry = scrolledtext.ScrolledText(main_frame, height=6, width=60, wrap=tk.WORD)
+        self.quote_text_entry.pack(fill=tk.X, pady=(0, 15))
+        
+        ttk.Label(main_frame, text="Автор:", font=('Arial', 10, 'bold')).pack(anchor=tk.W, pady=(0, 5))
+        self.author_entry = ttk.Entry(main_frame, width=50)
+        self.author_entry.pack(fill=tk.X, pady=(0, 15))
+        
+        ttk.Label(main_frame, text="Тема:", font=('Arial', 10, 'bold')).pack(anchor=tk.W, pady=(0, 5))
+        self.topic_entry = ttk.Entry(main_frame, width=50)
+        self.topic_entry.pack(fill=tk.X, pady=(0, 20))
+        
+        buttons_frame = ttk.Frame(main_frame)
+        buttons_frame.pack(fill=tk.X)
+        
+        save_btn = ttk.Button(buttons_frame, text="💾 Сохранить цитату", command=self.save_new_quote)
+        save_btn.pack(side=tk.LEFT, padx=5)
+        
+        clear_btn = ttk.Button(buttons_frame, text="🗑️ Очистить поля", command=self.clear_add_form)
+        clear_btn.pack(side=tk.LEFT, padx=5)
+    
+    def setup_history_tab(self):
+        """Setup the history tab"""
+        main_frame = ttk.Frame(self.history_frame, padding="10")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        filter_frame = ttk.LabelFrame(main_frame, text="Фильтрация истории", padding="10")
+        filter_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        ttk.Label(filter_frame, text="Автор:").grid(row=0, column=0, sticky=tk.W, padx=5)
+        self.history_author_var = tk.StringVar(value="Все")
+        self.history_author_combo = ttk.Combobox(filter_frame, textvariable=self.history_author_var, width=30)
+        self.history_author_combo.grid(row=0, column=1, padx=5, pady=5)
+        
+        ttk.Label(filter_frame, text="Тема:").grid(row=1, column=0, sticky=tk.W, padx=5)
+        self.history_topic_var = tk.StringVar(value="Все")
+        self.history_topic_combo = ttk.Combobox(filter_frame, textvariable=self.history_topic_var, width=30)
+        self.history_topic_combo.grid(row=1, column=1, padx=5, pady=5)
+        
+        apply_filter_btn = ttk.Button(filter_frame, text="🔍 Применить фильтр", 
+                                     command=self.display_filtered_history)
+        apply_filter_btn.grid(row=0, column=2, rowspan=2, padx=20, pady=5)
+        
+        history_display_frame = ttk.LabelFrame(main_frame, text="История цитат", padding="10")
+        history_display_frame.pack(fill=tk.BOTH, expand=True)
+        
+        columns = ("Дата", "Цитата", "Автор", "Тема")
+        self.history_tree = ttk.Treeview(history_display_frame, columns=columns, show="headings", height=15)
+        
+        self.history_tree.heading("Дата", text="Дата и время")
+        self.history_tree.heading("Цитата", text="Цитата")
+        self.history_tree.heading("Автор", text="Автор")
+        self.history_tree.heading("Тема", text="Тема")
+        
+        self.history_tree.column("Дата", width=150)
+        self.history_tree.column("Цитата", width=450)
+        self.history_tree.column("Автор", width=150)
+        self.history_tree.column("Тема", width=120)
+        
+        scrollbar = ttk.Scrollbar(history_display_frame, orient=tk.VERTICAL, command=self.history_tree.yview)
+        self.history_tree.configure(yscrollcommand=scrollbar.set)
+        
+        self.history_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        buttons_frame = ttk.Frame(main_frame)
+        buttons_frame.pack(fill=tk.X, pady=(10, 0))
+        
+        clear_history_btn = ttk.Button(buttons_frame, text="🗑️ Очистить всю историю", 
+                                      command=self.clear_all_history)
+        clear_history_btn.pack(side=tk.RIGHT, padx=5)
+        
+        refresh_btn = ttk.Button(buttons_frame, text="🔄 Обновить историю", 
+                                command=self.display_filtered_history)
+        refresh_btn.pack(side=tk.RIGHT, padx=5)
+    
+    def search_github_users(self):
+        """Search GitHub users - ОСНОВНАЯ ФУНКЦИЯ"""
+        username = self.github_search_entry.get().strip()
+        
+        if not username:
+            messagebox.showwarning("Пустой запрос", "Пожалуйста, введите имя пользователя для поиска.")
+            return
+        
+        self.status_var.set(f"Поиск пользователей по запросу '{username}'...")
+        
+        # Clear previous results
+        for item in self.github_tree.get_children():
+            self.github_tree.delete(item)
+        
+        self.user_details_text.delete(1.0, tk.END)
+        
+        # Perform search
+        result = self.github_api.search_users(username)
+        
+        if not result.get("success"):
+            messagebox.showerror("Ошибка поиска", result.get("error", "Неизвестная ошибка"))
+            self.status_var.set("Поиск завершён с ошибкой")
+            return
+        
+        total_count = result.get("total_count", 0)
+        users = result.get("users", [])
+        
+        if total_count == 0:
+            messagebox.showinfo("Ничего не найдено", f"Пользователи по запросу '{username}' не найдены.")
+            self.status_var.set("Пользователи не найдены")
+            return
+        
+        # Display results
+        for user in users[:20]:  # Show top 20
+            self.github_tree.insert("", tk.END, values=(
+                "👤",
+                user.get("login", "N/A"),
+                user.get("type", "N/A"),
+                user.get("public_repos", "N/A"),
+                user.get("followers", "N/A")
+            ))
+        
+        self.status_var.set(f"Найдено пользователей: {total_count}. Показано: {min(20, total_count)}")
+    
+    def on_user_select(self, event):
+        """Handle user selection from treeview"""
+        selected = self.github_tree.selection()
+        if not selected:
+            return
+        
+        item = self.github_tree.item(selected[0])
+        username = item['values'][1]  # Login is second column
+        
+        self.status_var.set(f"Загрузка информации о пользователе {username}...")
+        
+        # Get user details
+        result = self.github_api.get_user_details(username)
+        
+        if not result.get("success"):
+            self.user_details_text.delete(1.0, tk.END)
+            self.user_details_text.insert(1.0, f"Ошибка: {result.get('error', 'Неизвестная ошибка')}")
+            self.status_var.set("Ошибка загрузки информации")
+            return
+        
+        user = result.get("user", {})
+        
+        # Display user details
+        details = f"""
+📊 ИНФОРМАЦИЯ О ПОЛЬЗОВАТЕЛЕ GITHUB
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+👤 Логин: {user.get('login', 'N/A')}
+📛 Имя: {user.get('name', 'Не указано')}
+🏢 Компания: {user.get('company', 'Не указана')}
+📍 Локация: {user.get('location', 'Не указана')}
+📧 Email: {user.get('email', 'Не указан')}
+🌐 Блог: {user.get('blog', 'Не указан')}
+📝 Био: {user.get('bio', 'Не указана')}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 СТАТИСТИКА
+
+🔢 Публичные репозитории: {user.get('public_repos', 0)}
+👥 Подписчики: {user.get('followers', 0)}
+👤 Подписки: {user.get('following', 0)}
+📅 Дата регистрации: {user.get('created_at', 'N/A')[:10]}
+🔄 Последняя активность: {user.get('updated_at', 'N/A')[:10]}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🔗 Ссылки
+
+Профиль GitHub: {user.get('html_url', 'N/A')}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        """
+        
+        self.user_details_text.delete(1.0, tk.END)
+        self.user_details_text.insert(1.0, details)
+        self.status_var.set(f"Информация о пользователе {username} загружена")
+        
+        # Store current username for actions
+        self.current_github_user = username
+    
+    def open_github_profile(self):
+        """Open GitHub profile in browser"""
+        if hasattr(self, 'current_github_user') and self.current_github_user:
+            import webbrowser
+            url = f"https://github.com/{self.current_github_user}"
+            webbrowser.open(url)
+            self.status_var.set(f"Открыт профиль: {url}")
+        else:
+            messagebox.showwarning("Нет выбора", "Пожалуйста, выберите пользователя из списка.")
+    
+    def show_user_repos(self):
+        """Show user repositories in a new window"""
+        if not hasattr(self, 'current_github_user') or not self.current_github_user:
+            messagebox.showwarning("Нет выбора", "Пожалуйста, выберите пользователя из списка.")
+            return
+        
+        repos = self.github_api.get_user_repos(self.current_github_user)
+        
+        if not repos:
+            messagebox.showinfo("Нет репозиториев", "У этого пользователя нет публичных репозиториев.")
+            return
+        
+        # Create new window
+        repos_window = tk.Toplevel(self.root)
+        repos_window.title(f"Репозитории
